@@ -1,0 +1,7 @@
+import { describe, it, expect } from 'vitest';
+import { score, csvCell } from '../src/lib/scoring';
+import { publicAddress } from '../src/lib/safe-fetch';
+import { leadSchema } from '../src/lib/schemas';
+describe('evidence scoring', () => { it('does not penalize unavailable checks', () => expect(score('https://example.com', [{ key: 'mobile', passed: null, evidence: 'unavailable' }]).score).toBe(0)); it('does not infer website absence from a missing field', () => expect(score('', []).score).toBe(0)); it('records reasons for failed checks', () => { const s = score('https://example.com', [{ key: 'available', passed: false, evidence: 'HTTP 503' }]); expect(s.score).toBe(25); expect(s.reasons[0]).toContain('HTTP 503'); }); });
+describe('SSRF boundary', () => { it.each(['127.0.0.1', '10.1.2.3', '169.254.169.254', '192.168.0.1', '::1', '::ffff:127.0.0.1', 'fc00::1', '0.0.0.0', '100.64.0.1'])('rejects %s', a => expect(publicAddress(a)).toBe(false)); it('accepts public addresses', () => expect(publicAddress('8.8.8.8')).toBe(true)); });
+describe('exports and validation', () => { it('neutralizes spreadsheet formulas including whitespace', () => { expect(csvCell(' =HYPERLINK("x")')).toBe('"\' =HYPERLINK(""x"")"'); }); it('rejects script website URLs', () => expect(leadSchema.safeParse({ business_name: 'Test', city: 'Riyadh', category: 'Contractor', website: 'javascript:alert(1)' }).success).toBe(false)); });

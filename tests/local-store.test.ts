@@ -1,0 +1,22 @@
+import {describe,it,expect,afterEach} from 'vitest';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {LocalStore} from '../src/lib/local-store';
+import {localClient} from '../src/lib/local-client';
+import {localHost} from '../src/lib/storage-mode';
+const stores:LocalStore[]=[];const paths:string[]=[];
+function store(){const s=new LocalStore(':memory:');stores.push(s);return s;}
+afterEach(()=>{stores.splice(0).forEach(s=>s.close());paths.splice(0).forEach(p=>rmSync(p,{recursive:true,force:true}));});
+const lead={business_name:'Private contractor',city:'Riyadh',category:'Contractor'};
+describe('SQLite persistence and access boundaries',()=>{
+ it('persists actual records after reopening the database',()=>{const dir=mkdtempSync(join(tmpdir(),'vexora-test-'));paths.push(dir);const filename=join(dir,'db.sqlite');const a=new LocalStore(filename);const user=a.createUser();a.mutate('lead_records',user.id,'insert',[lead],[]);a.close();const b=new LocalStore(filename);expect(b.rows('lead_records',user.id)[0].business_name).toBe(lead.business_name);b.close();});
+ it('denies unauthenticated queries and isolates owners',async()=>{const s=store();const a=s.createUser('a@example.com');const b=s.createUser('b@example.com');const clientA=localClient(s.createSession(a.id),s);const clientB=localClient(s.createSession(b.id),s);const inserted=await clientA.from('lead_records').insert(lead).select().single();expect(inserted.error).toBeNull();expect((await clientB.from('lead_records').select('*')).data).toEqual([]);const denied=await localClient(undefined,s).from('lead_records').select('*');expect(denied.error).not.toBeNull();});
+ it('blocks cross-owner child associations and rolls back writes',()=>{const s=store();const a=s.createUser('a@example.com');const b=s.createUser('b@example.com');const row=s.mutate('lead_records',a.id,'insert',[lead],[])[0];expect(()=>s.mutate('lead_sources',b.id,'insert',[{lead_id:row.id,payload:{}}],[])).toThrow();expect(s.rows('lead_sources',b.id)).toHaveLength(0);});
+ it('enforces case-insensitive deduplication and records history',()=>{const s=store();const a=s.createUser();s.mutate('lead_records',a.id,'insert',[lead],[]);expect(()=>s.mutate('lead_records',a.id,'insert',[{...lead,business_name:lead.business_name.toUpperCase()}],[])).toThrow();expect(s.rows('lead_activities',a.id)).toHaveLength(1);});
+ it('revokes sessions and does not store raw session secrets',()=>{const s=store();const a=s.createUser();const token=s.createSession(a.id);expect(s.userForSession(token)?.id).toBe(a.id);expect(JSON.stringify(s.sql.prepare('SELECT * FROM local_sessions').all())).not.toContain(token);s.revokeSession(token);expect(s.userForSession(token)).toBeNull();});
+ it('reserves usage durably and rejects calls over budget',()=>{const s=store();const a=s.createUser();s.mutate('app_settings',a.id,'insert',[{enabled:true,daily_calls:5,daily_searches:5,monthly_budget:.2,google_unit_cost:.1,ai_unit_cost:.1}],[]);s.rpc('reserve_google_call',a.id);s.rpc('reserve_ai_call',a.id);expect(()=>s.rpc('reserve_google_call',a.id)).toThrow();expect(s.rows('api_usage',a.id)).toHaveLength(2);expect(s.rpc('usage_summary',a.id)).toMatchObject({today:2,month:2,cost:.2});expect(()=>s.mutate('api_usage',a.id,'insert',[{}],[])).toThrow();});
+ it('enforces the request rate limit',()=>{const s=store();const a=s.createUser();for(let i=0;i<30;i++)s.rpc('check_rate_limit',a.id);expect(()=>s.rpc('check_rate_limit',a.id)).toThrow();});
+ it('supports edits, joined follow-ups and selecting a single record',async()=>{const s=store();const a=s.createUser();const client=localClient(s.createSession(a.id),s);const row=(await client.from('lead_records').insert(lead).select().single()).data!;await client.from('lead_records').update({status:'Qualified'}).eq('id',row.id);await client.from('follow_ups').insert({lead_id:row.id,payload:{stage:'First follow-up'},due_at:new Date().toISOString()});expect((await client.from('lead_records').select('*').eq('id',row.id).single()).data.status).toBe('Qualified');expect((await client.from('follow_ups').select('*,lead_records(business_name)')).data![0].lead_records.business_name).toBe(lead.business_name);});
+ it.each(['example.com','localhost.attacker.com','127.0.0.1.attacker.com','192.168.1.5','localhost:123/x'])('rejects non-loopback host %s',host=>expect(localHost(host)).toBe(false));
+});

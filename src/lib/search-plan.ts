@@ -1,0 +1,6 @@
+import {z} from 'zod';
+import {cityLabel,categoryLabel,sectorFor,serviceLabels} from './catalog';
+export const searchPlanSchema=z.object({name:z.string().trim().min(2).max(100),region:z.string().max(100).default(''),cities:z.array(z.string().min(2).max(100)).min(1).max(10),category:z.string().min(2).max(100),specialty:z.string().max(100).default(''),district:z.string().max(100).default(''),keywords:z.string().max(200).default(''),exclude:z.string().max(200).default(''),service:z.enum(['any','website','ecommerce','software','app','marketing','design']).default('any')});
+export type SearchPlan=z.infer<typeof searchPlanSchema>;
+export function buildSearchQuery(plan:Pick<SearchPlan,'category'|'specialty'|'district'|'keywords'>,city:string){return [categoryLabel(plan.category),plan.specialty,plan.keywords,plan.district,cityLabel(city),'السعودية'].filter(Boolean).join(' ');}
+export function searchGuidance(category:string,service:string){const s=sectorFor(category);return {offer:service!=='any'?serviceLabels[service as keyof typeof serviceLabels]:s?.offer??'ابدأ بفهم احتياج الشركة',question:s?.question??'ما الأولوية الرقمية للشركة؟',warning:'كلمات الاستبعاد فلتر محلي لما يُعرض فقط، وليست ضمانًا أن Google يستبعد جميع النتائج. بيانات الميزانية والحجم ونية الشراء تحتاج تحققًا مستقلًا.'};}
