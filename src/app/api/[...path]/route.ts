@@ -23,10 +23,7 @@ async function handler(req: NextRequest, { params }: {
     try {
         if (req.method !== 'GET' && !isSameOrigin(req))
             return NextResponse.json({ error: 'Invalid request origin' }, { status: 403 });
-        const client = await db();
-        const { data: { user } } = await client.auth.getUser();
-        if (!user)
-            return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+        const { client, owner } = await db();
         const limited = await client.rpc('check_rate_limit');
         if (limited.error)
             return NextResponse.json({ error: 'Request limit reached or security migration missing' }, { status: 429 });
@@ -46,8 +43,8 @@ async function handler(req: NextRequest, { params }: {
         if(path[0]==='usage-summary')return NextResponse.json(checked(await client.rpc('usage_summary')));
         if(path[0]==='sales-analytics'){const [drafts,activities]=await Promise.all([allRows(client,'ai_generations'),allRows(client,'lead_activities')]);return NextResponse.json({variants:variantAnalytics(drafts,activities)});}
         if(path[0]==='sales-profile'){
-            if(req.method==='GET'){const result=await client.from('sales_profiles').select('data').eq('owner_id',user.id).maybeSingle();if(result.error){if(['PGRST205','42P01'].includes(result.error.code))return NextResponse.json({data:salesProfileSchema.parse({}),requires_migration:true});checked(result);}return NextResponse.json({data:result.data?.data??salesProfileSchema.parse({}),requires_migration:false});}
-            const data=salesProfileSchema.parse(body);const result=await client.from('sales_profiles').upsert({owner_id:user.id,data},{onConflict:'owner_id'});if(result.error)throw new Error('احفظ ملف خدمات Vexora بعد تشغيل تحديث قاعدة البيانات 008 من SQL Editor.');return NextResponse.json({ok:true});
+            if(req.method==='GET'){const result=await client.from('sales_profiles').select('data').eq('owner_id',owner.id).maybeSingle();if(result.error){if(['PGRST205','42P01'].includes(result.error.code))return NextResponse.json({data:salesProfileSchema.parse({}),requires_migration:true});checked(result);}return NextResponse.json({data:result.data?.data??salesProfileSchema.parse({}),requires_migration:false});}
+            const data=salesProfileSchema.parse(body);const result=await client.from('sales_profiles').upsert({owner_id:owner.id,data},{onConflict:'owner_id'});if(result.error)throw new Error('احفظ ملف خدمات Vexora بعد تشغيل تحديث قاعدة البيانات 008 من SQL Editor.');return NextResponse.json({ok:true});
         }
         if(path[0]==='saved-searches'){
             if(req.method==='GET'){const rows=await allRows(client,'search_jobs');return NextResponse.json(rows.filter(r=>r.status==='saved').map(r=>{try{const plan=searchPlanSchema.parse(JSON.parse(String(r.query)));return {id:r.id,plan};}catch{return null;}}).filter(Boolean));}
@@ -58,9 +55,9 @@ async function handler(req: NextRequest, { params }: {
             return NextResponse.json(checked(await client.from('lead_activities').select('*,lead_records(business_name)').order('created_at', { ascending: false }).limit(10)));
         if (path[0] === 'profile') {
             if (req.method === 'GET')
-                return NextResponse.json({ email: user.email, profile: checked(await client.from('profiles').select('*').eq('id', user.id).maybeSingle()) });
+                return NextResponse.json({ email: owner.email, profile: checked(await client.from('profiles').select('*').eq('id', owner.id).maybeSingle()) });
             const display_name = z.string().trim().min(1).max(100).parse(body.display_name);
-            return NextResponse.json(checked(await client.from('profiles').upsert({ id: user.id, display_name }).select().single()));
+            return NextResponse.json(checked(await client.from('profiles').upsert({ id: owner.id, display_name }).select().single()));
         }
         if(path[0]==='import-leads'){
             if(req.method!=='POST'||body.licensed!==true)throw new Error('أكد حق استخدام مصدر الملف قبل الاستيراد.');
@@ -92,7 +89,7 @@ async function handler(req: NextRequest, { params }: {
         if (path[0] === 'settings') {
             if (req.method === 'GET')
                 return NextResponse.json(checked(await client.from('app_settings').select('*').maybeSingle()));
-            return NextResponse.json(checked(await client.from('app_settings').upsert({ ...settingsSchema.parse(body), owner_id: user.id }, { onConflict: 'owner_id' }).select().single()));
+            return NextResponse.json(checked(await client.from('app_settings').upsert({ ...settingsSchema.parse(body), owner_id: owner.id }, { onConflict: 'owner_id' }).select().single()));
         }
         if (path[0] === 'usage')
             return NextResponse.json(checked(await client.from('api_usage').select('*').order('created_at', { ascending: false }).limit(1000)));
@@ -221,7 +218,7 @@ async function handler(req: NextRequest, { params }: {
                 if (reserve.error)
                     throw new Error('AI usage is disabled or its budget limit is reached');
             }
-            const storedProfile=await client.from('sales_profiles').select('data').eq('owner_id',user.id).maybeSingle();
+            const storedProfile=await client.from('sales_profiles').select('data').eq('owner_id',owner.id).maybeSingle();
             const profile=salesProfileSchema.safeParse(storedProfile.data?.data);const result = await draft({ lead, audits,qualification,profile:profile.success?profile.data:undefined }, language, kind,useAI,variant);
             checked(await client.from('ai_generations').insert({ lead_id: leadId, payload: { ...result, language, kind,variant } }));
             return NextResponse.json(result);

@@ -2,15 +2,15 @@ import {describe,it,expect,vi,beforeEach,afterEach} from 'vitest';
 import type {SupabaseClient} from '@supabase/supabase-js';
 import {NextRequest} from 'next/server';
 import {LocalStore} from '../src/lib/local-store';
-import {localClient} from '../src/lib/local-client';
+import {localClientForOwner} from '../src/lib/local-client';
 const context=vi.hoisted(()=>({client:null as SupabaseClient|null}));
-vi.mock('../src/lib/supabase',()=>({db:async()=>context.client}));
+vi.mock('../src/lib/supabase',()=>({db:async()=>({client:context.client,owner:user})}));
 import {GET,POST} from '../src/app/api/[...path]/route';
 let store:LocalStore;let user:{id:string;email:string};let leadId:string;
-beforeEach(async()=>{store=new LocalStore(':memory:');user=store.createUser();context.client=localClient(store.createSession(user.id),store);const r=await context.client.from('lead_records').insert({business_name:'QA-only company',city:'Jeddah',category:'General Contractors'}).select().single();leadId=r.data!.id;});
+beforeEach(async()=>{store=new LocalStore(':memory:');user=store.createUser();context.client=localClientForOwner(user.id,store);const r=await context.client.from('lead_records').insert({business_name:'QA-only company',city:'Jeddah',category:'General Contractors'}).select().single();leadId=r.data!.id;});
 afterEach(()=>{store.close();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 async function call(path:string,body?:unknown){const request=new NextRequest('http://127.0.0.1:3107/api/'+path,{method:body?'POST':'GET',headers:{host:'127.0.0.1:3107',origin:'http://127.0.0.1:3107','Content-Type':'application/json'},...body?{body:JSON.stringify(body)}:{}});return (body?POST:GET)(request,{params:Promise.resolve({path:path.split('/')})});}
-describe('authenticated sales workflows',()=>{
+describe('workspace sales workflows',()=>{
  it('saves qualification with provenance and returns enriched CRM records',async()=>{const r=await call('qualification',{lead_id:leadId,data:{fit:'yes',official_contact:'yes',evidence:'Official website reviewed today'}});expect(r.status).toBe(200);const rows=await (await call('leads')).json();expect(rows[0].qualification.fit).toBe('yes');expect(rows[0].quality.coverage).toBe(40);expect(rows[0].score).toBe(0);expect(store.rows('lead_sources',user.id)[0].payload).toMatchObject({kind:'qualification'});});
  it('rejects unsupported claims without writing qualification data',async()=>{const r=await call('qualification',{lead_id:leadId,data:{website_state:'confirmed_absent'}});expect(r.status).toBe(400);expect(store.rows('lead_sources',user.id)).toHaveLength(0);});
  it('blocks drafts and future follow-ups for excluded prospects',async()=>{await call('qualification',{lead_id:leadId,data:{excluded:true,exclusion_reason:'Not a business fit'}});expect((await call('draft',{lead_id:leadId,kind:'First contact',language:'ar'})).status).toBe(400);expect((await call('follow-ups',{lead_id:leadId,due_at:new Date().toISOString(),stage:'First follow-up'})).status).toBe(400);expect(store.rows('ai_generations',user.id)).toHaveLength(0);});

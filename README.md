@@ -1,17 +1,18 @@
-﻿# VEXORA LEAD HUNTER
+# VEXORA LEAD HUNTER
 
 Private Next.js App Router / strict TypeScript / Tailwind / Supabase workspace. There is no seeded production data. Provider calls run on the server.
 
-## Local setup
+## Workspace setup
 
-1. Install Node.js 22+ and run `npm install` (`npm.cmd` on PowerShell systems that block npm.ps1).
-2. Copy `.env.example` to `.env.local`. Set your Supabase URL and public anon/publishable key. Never use a service-role key here.
-3. Apply all SQL files in `supabase/migrations` in order with the Supabase SQL editor or migration tooling.
-4. Disable public signups in Supabase Auth. Create/invite your internal users and set their passwords in Supabase. Configure Auth rate limits and production redirect URLs.
-5. Run `npm run dev`, open http://localhost:3000/login, and sign in.
-6. Run `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` before deployment. Deploy to a Node.js-compatible Next.js host, set environment variables, then run `npm start` when self-hosting.
+Install Node.js 22+ and run `npm install`. For local SQLite, leave Supabase variables unset and open http://localhost:3000/dashboard with `npm run dev`, or use `Start Vexora.cmd`.
 
-Without Supabase configuration, the dashboard shell and integration instructions can be viewed, but no data access or provider calls succeed. Missing configuration never selects a fake database.
+For Vercel, apply the Supabase migrations in order and configure these variables for the deployment environment.
+
+- `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` for the same project.
+- `SUPABASE_JWT_SECRET` with the project's legacy HS256 JWT signing secret. Keep this variable server-only.
+- `WORKSPACE_OWNER_ID` with the UUID of the existing Supabase user whose workspace records should be used. The database uses that UUID to scope records. Visitors open the dashboard directly.
+
+Redeploy after saving the variables. Every visitor who can reach the deployment can read and modify the same workspace and invoke enabled integrations. Use deployment-level access restrictions if the workspace needs to be private.
 
 ## Integrations
 
@@ -23,7 +24,7 @@ Without Supabase configuration, the dashboard shell and integration instructions
 
 ## Data protection
 
-Every data table has RLS. Child rows reference `(lead_id, owner_id)` to prevent cross-owner associations. Each user owns their records; this is not a shared multi-user sales team database. All authenticated API operations have a database-backed 30/minute limit. Supabase Auth handles login rate limits. Private responses are no-store, mutations require matching Origin, and CSV cells are formula-neutralized. Audit history records lead mutations through a database trigger. API usage reservations are read-only to clients.
+Every data table has RLS. Child rows reference `(lead_id, owner_id)` to prevent cross-owner associations. Each user owns their records; this is not a shared multi-user sales team database. Workspace API operations share a database-backed 30/minute limit. Private responses are no-store, mutations require matching Origin, and CSV cells are formula-neutralized. Audit history records lead mutations through a database trigger. API usage reservations are read-only to clients.
 
 Deploy behind HTTPS. No secrets should be logged. Keep backups and manage retention for your business records; rotate provider credentials using host environment settings. Do not store restricted Google content in manually entered CRM fields. Place ID results contain no Google place display content; any future display of such content must implement the current attribution and retention requirements before use.
 

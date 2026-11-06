@@ -38,3 +38,16 @@ export function localClient(token?:string,store=localStore()):SupabaseClient{
     // Compatibility boundary, deliberately restricted to the server query methods above.
     return client as unknown as SupabaseClient;
 }
+
+export function localClientForOwner(ownerId: string, store: LocalStore): SupabaseClient {
+    return {
+        from: (table: string) => new Query(store, table, ownerId),
+        rpc: async (name: string) => {
+            try {
+                return { data: store.rpc(name, ownerId), error: null };
+            } catch (error) {
+                return { data: null, error: { message: (error as Error).message } };
+            }
+        },
+    } as unknown as SupabaseClient;
+}
